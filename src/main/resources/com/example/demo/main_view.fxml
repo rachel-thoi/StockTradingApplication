@@ -1,0 +1,142 @@
+<?xml version="1.0" encoding="UTF-8"?>
+
+<?import javafx.geometry.Insets?>
+<?import javafx.scene.control.*?>
+<?import javafx.scene.image.ImageView?>
+<?import javafx.scene.layout.*?>
+
+<BorderPane xmlns:fx="http://javafx.com/fxml/1"
+            xmlns="http://javafx.com/javafx/21"
+            fx:controller="com.example.demo.OptionsAnalyzerController"
+            styleClass="root">
+
+    <!-- Top Section - Title -->
+    <top>
+        <VBox alignment="CENTER" spacing="5" styleClass="header-section">
+            <padding>
+                <Insets top="15" right="15" bottom="15" left="15"/>
+            </padding>
+            <Label text="Options Pricing Analysis" styleClass="title-label"/>
+            <Label text="Black-Scholes Model with Greeks Calculation" styleClass="subtitle-label"/>
+        </VBox>
+    </top>
+
+    <!-- Left Section - Input Panel -->
+    <left>
+        <VBox spacing="12" styleClass="input-panel" prefWidth="280">
+            <padding>
+                <Insets top="20" right="20" bottom="20" left="20"/>
+            </padding>
+
+            <!-- Section Title -->
+            <Label text="Input Parameters" styleClass="section-title"/>
+            <Separator/>
+
+            <!-- Stock Symbol -->
+            <VBox spacing="5">
+                <Label text="Stock Symbol:" styleClass="input-label"/>
+                <TextField fx:id="stockSymbolField" promptText="e.g., AAPL"/>
+            </VBox>
+
+            <!-- Expiration Date -->
+            <VBox spacing="5">
+                <Label text="Expiration Date:" styleClass="input-label"/>
+                <DatePicker fx:id="expirationDatePicker" maxWidth="Infinity"/>
+            </VBox>
+
+            <!-- Option Type -->
+            <VBox spacing="5">
+                <Label text="Option Type:" styleClass="input-label"/>
+                <ComboBox fx:id="optionTypeCombo" maxWidth="Infinity"/>
+            </VBox>
+
+            <!-- Risk-Free Rate -->
+            <VBox spacing="5">
+                <Label text="Risk-Free Interest Rate (%):" styleClass="input-label"/>
+                <TextField fx:id="riskFreeRateField" promptText="e.g., 5.0"/>
+            </VBox>
+
+            <!-- Historical Volatility -->
+            <VBox spacing="5">
+                <Label text="Historical Volatility (%):" styleClass="input-label"/>
+                <TextField fx:id="volatilityField" promptText="e.g., 25.0"/>
+            </VBox>
+
+            <Separator/>
+
+            <!-- Buttons -->
+            <VBox spacing="10" alignment="CENTER">
+                <Button fx:id="executeButton" text="Execute Analysis"
+                        styleClass="execute-button" maxWidth="Infinity"
+                        onAction="#handleExecuteAction"/>
+
+                <HBox spacing="10" alignment="CENTER">
+                    <Button fx:id="clearButton" text="Clear"
+                            styleClass="secondary-button"
+                            onAction="#handleClearAction"
+                            HBox.hgrow="ALWAYS" maxWidth="Infinity"/>
+                    <Button fx:id="installDepsButton" text="Install Deps"
+                            styleClass="secondary-button"
+                            onAction="#handleInstallDependencies"
+                            HBox.hgrow="ALWAYS" maxWidth="Infinity"/>
+                </HBox>
+            </VBox>
+
+            <!-- Progress and Status -->
+            <VBox spacing="8" alignment="CENTER">
+                <ProgressIndicator fx:id="progressIndicator" prefWidth="40" prefHeight="40"/>
+                <Label fx:id="statusLabel" text="Ready" styleClass="status-label"/>
+            </VBox>
+
+            <!-- Spacer -->
+            <Region VBox.vgrow="ALWAYS"/>
+
+            <!-- Help Text -->
+            <VBox styleClass="help-box" spacing="3">
+                <Label text="Quick Tips:" styleClass="help-title"/>
+                <Label text="• Enter valid stock symbols (e.g., AAPL)" styleClass="help-text" wrapText="true"/>
+                <Label text="• Volatility is typically 15-50%" styleClass="help-text" wrapText="true"/>
+                <Label text="• Risk-free rate ≈ Treasury yield" styleClass="help-text" wrapText="true"/>
+            </VBox>
+        </VBox>
+    </left>
+
+    <!-- Center Section - Chart Display -->
+    <center>
+        <VBox spacing="10" styleClass="center-panel">
+            <padding>
+                <Insets top="20" right="20" bottom="10" left="10"/>
+            </padding>
+
+            <Label text="Analysis Results" styleClass="section-title"/>
+
+            <StackPane fx:id="chartContainer" styleClass="chart-container"
+                       VBox.vgrow="ALWAYS" minHeight="400">
+                <Label fx:id="placeholderLabel" text="Chart will appear here after analysis"
+                       styleClass="placeholder-label"/>
+                <ImageView fx:id="chartImageView" preserveRatio="true"
+                           fitWidth="700" fitHeight="500">
+                </ImageView>
+            </StackPane>
+        </VBox>
+    </center>
+
+    <!-- Bottom Section - Output Log -->
+    <bottom>
+        <VBox spacing="5" styleClass="output-panel">
+            <padding>
+                <Insets top="10" right="20" bottom="15" left="20"/>
+            </padding>
+
+            <HBox alignment="CENTER_LEFT" spacing="10">
+                <Label text="Output Log" styleClass="section-title"/>
+                <Region HBox.hgrow="ALWAYS"/>
+                <Button text="Clear Log" styleClass="small-button"
+                        onAction="#handleClearAction"/>
+            </HBox>
+
+            <TextArea fx:id="outputArea" editable="false" wrapText="true"
+                      prefHeight="140" styleClass="output-area"/>
+        </VBox>
+    </bottom>
+</BorderPane>
