@@ -497,13 +497,17 @@ public class OptionsAnalyzerApp extends Application {
             File chartFile = new File(tempDir, "options_chart.png");
 
             if (chartFile.exists()) {
-                String imageUrl = chartFile.toURI().toString() + "?t=" + System.currentTimeMillis();
-                Image chartImage = new Image(imageUrl);
+                Image chartImage;
+                try (java.io.FileInputStream imageStream = new java.io.FileInputStream(chartFile)) {
+                    chartImage = new Image(imageStream);
+                }
 
                 if (!chartImage.isError()) {
                     chartImageView.setImage(chartImage);
                     placeholderLabel.setVisible(false);
                     logMessage("Chart loaded successfully.");
+                } else {
+                    logMessage("Failed to load chart image: " + chartImage.getException());
                 }
             } else {
                 logMessage("Chart file not found at: " + chartFile.getAbsolutePath());
