@@ -8,6 +8,7 @@ import java.util.concurrent.TimeUnit;
 public class PythonExecutor {
 
     private static final String PYTHON_SCRIPT_NAME = "options_analysis.py";
+    private static final String BAYESIAN_SCRIPT_NAME = "bayesian_forecast.py";
     private static final int TIMEOUT_SECONDS = 120;
     private final String pythonCommand;
 
@@ -25,8 +26,7 @@ public class PythonExecutor {
 
         System.out.println("Script path: " + scriptPath);
 
-        ProcessBuilder processBuilder = new ProcessBuilder(
-                pythonCommand,
+        return runScript(
                 scriptPath,
                 stockSymbol,
                 expirationDate,
@@ -35,7 +35,30 @@ public class PythonExecutor {
                 String.valueOf(volatility),
                 outputDir
         );
+    }
 
+    public String executeBayesianForecast(String stockSymbol) throws Exception {
+        String scriptPath = extractScript(BAYESIAN_SCRIPT_NAME);
+        if (scriptPath == null) {
+            throw new FileNotFoundException(
+                    BAYESIAN_SCRIPT_NAME + " not found in application resources");
+        }
+        String outputDir = System.getProperty("java.io.tmpdir");
+
+        System.out.println("Script path: " + scriptPath);
+
+        return runScript(scriptPath, stockSymbol, outputDir);
+    }
+
+    private String runScript(String scriptPath, String... args) throws Exception {
+        String outputDir = System.getProperty("java.io.tmpdir");
+
+        java.util.List<String> command = new java.util.ArrayList<>();
+        command.add(pythonCommand);
+        command.add(scriptPath);
+        command.addAll(java.util.Arrays.asList(args));
+
+        ProcessBuilder processBuilder = new ProcessBuilder(command);
         processBuilder.directory(new File(outputDir));
         processBuilder.redirectErrorStream(true);
         processBuilder.environment().put("PYTHONIOENCODING", "utf-8");
@@ -68,12 +91,22 @@ public class PythonExecutor {
     }
 
     private String extractPythonScript() throws IOException {
+        String scriptPath = extractScript(PYTHON_SCRIPT_NAME);
+        if (scriptPath == null) {
+            // Create embedded script if not found
+            System.out.println("Script not found in resources, using embedded script");
+            return createEmbeddedScript();
+        }
+        return scriptPath;
+    }
+
+    private String extractScript(String scriptName) throws IOException {
         // Try to find the script in resources
         String[] paths = {
-                "/com/example/demo/options_analysis.py",
-                "/options_analysis.py",
-                "options_analysis.py",
-                "com/example/demo/options_analysis.py"
+                "/com/example/demo/" + scriptName,
+                "/" + scriptName,
+                scriptName,
+                "com/example/demo/" + scriptName
         };
 
         InputStream stream = null;
@@ -91,12 +124,11 @@ public class PythonExecutor {
         }
 
         if (stream == null) {
-            // Create embedded script if not found
-            System.out.println("Script not found in resources, using embedded script");
-            return createEmbeddedScript();
+            return null;
         }
 
-        Path tempScript = Files.createTempFile("options_analysis_", ".py");
+        Path tempScript = Files.createTempFile(
+                scriptName.replace(".py", "") + "_", ".py");
         Files.copy(stream, tempScript, StandardCopyOption.REPLACE_EXISTING);
         stream.close();
 
