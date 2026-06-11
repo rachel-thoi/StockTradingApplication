@@ -28,6 +28,7 @@ public class OptionsAnalyzerApp extends Application {
 
     // Action controls
     private Button executeButton;
+    private Button bayesianButton;
     private Button clearButton;
     private Button installDepsButton;
     private ProgressIndicator progressIndicator;
@@ -55,12 +56,27 @@ public class OptionsAnalyzerApp extends Application {
 
         // Create sections
         mainLayout.setTop(createHeader());
-        mainLayout.setLeft(createInputPanel());
+
+        ScrollPane inputScroll = new ScrollPane(createInputPanel());
+        inputScroll.setFitToWidth(true);
+        inputScroll.setFitToHeight(true);
+        inputScroll.setHbarPolicy(ScrollPane.ScrollBarPolicy.NEVER);
+        inputScroll.setVbarPolicy(ScrollPane.ScrollBarPolicy.AS_NEEDED);
+        inputScroll.setStyle("-fx-background-color: transparent; -fx-background: #f0f2f5;");
+        mainLayout.setLeft(inputScroll);
+
         mainLayout.setCenter(createCenterPanel());
         mainLayout.setBottom(createOutputPanel());
 
+        // Scroll the whole layout when the window is too small to fit it,
+        // so the output log at the bottom is never pushed off-screen
+        ScrollPane rootScroll = new ScrollPane(mainLayout);
+        rootScroll.setFitToWidth(true);
+        rootScroll.setFitToHeight(true);
+        rootScroll.setStyle("-fx-background-color: transparent; -fx-background: #f0f2f5;");
+
         // Create scene
-        Scene scene = new Scene(mainLayout, 1200, 800);
+        Scene scene = new Scene(rootScroll, 1200, 800);
 
         // Configure stage
         primaryStage.setTitle("Options Analysis Tool");
@@ -176,6 +192,16 @@ public class OptionsAnalyzerApp extends Application {
         );
         executeButton.setOnAction(e -> handleExecuteAction());
 
+        // Bayesian Forecast Button
+        bayesianButton = new Button("Bayesian Forecast");
+        bayesianButton.setMaxWidth(Double.MAX_VALUE);
+        bayesianButton.setStyle(
+                "-fx-background-color: linear-gradient(to bottom, #2980b9, #2471a3);" +
+                        "-fx-text-fill: white; -fx-font-size: 15px; -fx-font-weight: bold;" +
+                        "-fx-padding: 12 20; -fx-background-radius: 5; -fx-cursor: hand;"
+        );
+        bayesianButton.setOnAction(e -> handleBayesianForecast());
+
         // Clear and Install buttons
         clearButton = new Button("Clear");
         clearButton.setMaxWidth(Double.MAX_VALUE);
@@ -240,6 +266,7 @@ public class OptionsAnalyzerApp extends Application {
                 volLabel, volatilityField,
                 new Separator(),
                 executeButton,
+                bayesianButton,
                 buttonRow,
                 progressBox,
                 spacer,
@@ -271,7 +298,15 @@ public class OptionsAnalyzerApp extends Application {
         chartImageView.setFitWidth(700);
         chartImageView.setFitHeight(500);
 
-        chartContainer.getChildren().addAll(placeholderLabel, chartImageView);
+        StackPane imageHolder = new StackPane(chartImageView);
+        ScrollPane chartScroll = new ScrollPane(imageHolder);
+        chartScroll.setFitToWidth(true);
+        chartScroll.setFitToHeight(true);
+        chartScroll.setPannable(true);
+        // Transparent so the placeholder label shows through before a chart loads
+        chartScroll.setStyle("-fx-background-color: transparent; -fx-background: transparent;");
+
+        chartContainer.getChildren().addAll(placeholderLabel, chartScroll);
 
         centerPanel.getChildren().addAll(title, chartContainer);
         return centerPanel;
@@ -344,7 +379,7 @@ public class OptionsAnalyzerApp extends Application {
             Platform.runLater(() -> {
                 isRunning = false;
                 logMessage(analysisTask.getValue());
-                loadChartImage();
+                loadChartImage("options_chart.png");
                 setControlsEnabled(true);
                 progressIndicator.setVisible(false);
                 updateStatus("Analysis complete!", "#28a745");
@@ -370,6 +405,76 @@ public class OptionsAnalyzerApp extends Application {
 
         isRunning = true;
         Thread thread = new Thread(analysisTask);
+        thread.setDaemon(true);
+        thread.start();
+    }
+
+    private void handleBayesianForecast() {
+        if (isRunning) {
+            logMessage("Analysis already in progress. Please wait...");
+            return;
+        }
+
+        String stockSymbol = stockSymbolField.getText().trim().toUpperCase();
+        if (!stockSymbol.matches("^[A-Za-z]{1,5}$")) {
+            Alert alert = new Alert(Alert.AlertType.WARNING);
+            alert.setTitle("Validation Error");
+            alert.setContentText("Stock symbol must be 1-5 letters.");
+            alert.showAndWait();
+            return;
+        }
+
+        logMessage("═".repeat(50));
+        logMessage("Starting Bayesian forecast for " + stockSymbol);
+        logMessage("  Model: Beta-Bernoulli direction + Normal-Inverse-Gamma returns");
+        logMessage("  Evidence: historical HLOC + option open interest");
+        logMessage("═".repeat(50));
+
+        setControlsEnabled(false);
+        progressIndicator.setVisible(true);
+        updateStatus("Running Bayesian forecast...", "#007bff");
+
+        chartImageView.setImage(null);
+        placeholderLabel.setVisible(true);
+        placeholderLabel.setText("Processing...");
+
+        Task<String> forecastTask = new Task<>() {
+            @Override
+            protected String call() throws Exception {
+                return pythonExecutor.executeBayesianForecast(stockSymbol);
+            }
+        };
+
+        forecastTask.setOnSucceeded(e -> {
+            Platform.runLater(() -> {
+                isRunning = false;
+                logMessage(forecastTask.getValue());
+                loadChartImage("bayesian_chart.png");
+                setControlsEnabled(true);
+                progressIndicator.setVisible(false);
+                updateStatus("Forecast complete!", "#28a745");
+            });
+        });
+
+        forecastTask.setOnFailed(e -> {
+            Platform.runLater(() -> {
+                isRunning = false;
+                Throwable ex = forecastTask.getException();
+                logMessage("ERROR: " + (ex != null ? ex.getMessage() : "Unknown error"));
+                setControlsEnabled(true);
+                progressIndicator.setVisible(false);
+                updateStatus("Error occurred", "#dc3545");
+                placeholderLabel.setText("Error: Check output log");
+
+                Alert alert = new Alert(Alert.AlertType.ERROR);
+                alert.setTitle("Forecast Failed");
+                alert.setContentText(ex != null ? ex.getMessage() : "Unknown error");
+                alert.showAndWait();
+            });
+        });
+
+        isRunning = true;
+        Thread thread = new Thread(forecastTask);
         thread.setDaemon(true);
         thread.start();
     }
@@ -491,10 +596,10 @@ public class OptionsAnalyzerApp extends Application {
         return true;
     }
 
-    private void loadChartImage() {
+    private void loadChartImage(String fileName) {
         try {
             String tempDir = System.getProperty("java.io.tmpdir");
-            File chartFile = new File(tempDir, "options_chart.png");
+            File chartFile = new File(tempDir, fileName);
 
             if (chartFile.exists()) {
                 Image chartImage;
@@ -524,6 +629,7 @@ public class OptionsAnalyzerApp extends Application {
         riskFreeRateField.setDisable(!enabled);
         volatilityField.setDisable(!enabled);
         executeButton.setDisable(!enabled);
+        bayesianButton.setDisable(!enabled);
         clearButton.setDisable(!enabled);
         installDepsButton.setDisable(!enabled);
     }
