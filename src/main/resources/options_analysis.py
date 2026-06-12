@@ -128,8 +128,58 @@ def get_stock_data(symbol):
         raise
 
 
+def fetch_market_options(symbol, expiration_date, option_type):
+    """
+    Fetch actual market option prices for the requested expiration.
+
+    Uses the exact expiration when it is listed, otherwise the nearest one.
+    The market price per strike is the bid/ask midpoint when both sides are
+    quoted, falling back to the last traded price.
+
+    Returns None when the symbol has no listed options or no usable quotes.
+    """
+    try:
+        ticker = yf.Ticker(symbol)
+        expirations = list(ticker.options)
+        if not expirations:
+            return None
+
+        if expiration_date in expirations:
+            exp = expiration_date
+        else:
+            target = datetime.strptime(expiration_date, '%Y-%m-%d')
+            exp = min(expirations,
+                      key=lambda e: abs(datetime.strptime(e, '%Y-%m-%d') - target))
+
+        chain = ticker.option_chain(exp)
+        quotes = chain.calls if option_type == 'call' else chain.puts
+
+        strikes = quotes['strike'].values
+        bid = quotes['bid'].fillna(0).values
+        ask = quotes['ask'].fillna(0).values
+        last = quotes['lastPrice'].fillna(0).values
+        prices = np.where((bid > 0) & (ask > 0), (bid + ask) / 2.0, last)
+
+        valid = prices > 0
+        if not valid.any():
+            return None
+
+        exp_dt = datetime.strptime(exp, '%Y-%m-%d')
+        T = max((exp_dt - datetime.now()).days / 365.0, 0.001)
+
+        return {
+            'expiration': exp,
+            'T': T,
+            'strikes': strikes[valid],
+            'prices': prices[valid],
+        }
+    except Exception as e:
+        print(f"Warning: could not fetch market option chain: {e}")
+        return None
+
+
 def create_analysis_chart(stock_data, expiration_date, option_type, risk_free_rate,
-                          volatility, output_path):
+                          volatility, market, output_path):
     """
     Create comprehensive options analysis chart.
     """
@@ -154,16 +204,26 @@ def create_analysis_chart(stock_data, expiration_date, option_type, risk_free_ra
     # Create grid for subplots
     gs = fig.add_gridspec(2, 3, hspace=0.3, wspace=0.3)
 
-    # 1. Option Price vs Stock Price
+    # 1. Black-Scholes predicted vs actual market option prices (by strike)
     ax1 = fig.add_subplot(gs[0, 0])
     stock_prices = np.linspace(S * 0.5, S * 1.5, 100)
-    option_prices = [black_scholes(sp, S, T, r, sigma, option_type) for sp in stock_prices]
-    ax1.plot(stock_prices, option_prices, 'b-', linewidth=2, label=f'{option_type.capitalize()} Price')
-    ax1.axvline(x=S, color='r', linestyle='--', label=f'Current: ${S:.2f}')
-    ax1.axhline(y=black_scholes(S, S, T, r, sigma, option_type), color='g', linestyle=':', alpha=0.5)
-    ax1.set_xlabel('Stock Price ($)')
+    # Price the comparison at the expiration the market data is for, so the
+    # model and the quotes describe the same contract
+    T_cmp = market['T'] if market is not None else T
+    strikes_grid = np.linspace(S * 0.5, S * 1.5, 100)
+    model_prices = [black_scholes(S, k, T_cmp, r, sigma, option_type) for k in strikes_grid]
+    ax1.plot(strikes_grid, model_prices, 'b-', linewidth=2, label='Black-Scholes (model)')
+    if market is not None:
+        window = (market['strikes'] >= S * 0.5) & (market['strikes'] <= S * 1.5)
+        ax1.plot(market['strikes'][window], market['prices'][window], 'ro',
+                 markersize=4, alpha=0.7, label=f"Market ({market['expiration']})")
+    else:
+        ax1.text(0.5, 0.9, 'Market option data unavailable', transform=ax1.transAxes,
+                 ha='center', fontsize=9, color='gray')
+    ax1.axvline(x=S, color='g', linestyle='--', alpha=0.7, label=f'Spot: ${S:.2f}')
+    ax1.set_xlabel('Strike ($)')
     ax1.set_ylabel('Option Price ($)')
-    ax1.set_title('Option Price vs Stock Price')
+    ax1.set_title('Model vs Market Option Prices')
     ax1.legend(loc='best', fontsize=8)
     ax1.grid(True, alpha=0.3)
 
@@ -338,11 +398,26 @@ def main():
         print(f"  Vega:  ${greeks['vega']:.4f} per 1% volatility")
         print(f"  Rho:   ${greeks['rho']:.4f} per 1% interest rate")
 
+        # Fetch actual market option prices for comparison with the model
+        print(f"\nFetching market option chain...")
+        market = fetch_market_options(symbol, expiration_date, option_type)
+        if market is None:
+            print("No market option data available; chart will show model prices only.")
+        else:
+            print(f"Market expiration used: {market['expiration']} "
+                  f"({len(market['strikes'])} quoted strikes)")
+            model_at_strikes = np.array([
+                black_scholes(S, k, market['T'], r, sigma, option_type)
+                for k in market['strikes']
+            ])
+            mae = np.mean(np.abs(model_at_strikes - market['prices']))
+            print(f"Mean |model - market| across strikes: ${mae:.2f}")
+
         # Create analysis chart
         print(f"\nGenerating analysis chart...")
         chart_path = create_analysis_chart(
             stock_data, expiration_date, option_type,
-            risk_free_rate, volatility, output_dir
+            risk_free_rate, volatility, market, output_dir
         )
         print(f"Chart saved to: {chart_path}")
         print(f"\n{'=' * 50}")
