@@ -191,7 +191,37 @@ public class PythonExecutor {
                             raise ValueError(f"Could not fetch price for {symbol}")
                     return {'symbol': symbol, 'name': info.get('shortName', symbol), 'price': price}
                 
-                def create_chart(stock_data, exp_date, option_type, r_rate, vol, output_path):
+                def fetch_market_options(symbol, expiration_date, option_type):
+                    try:
+                        ticker = yf.Ticker(symbol)
+                        expirations = list(ticker.options)
+                        if not expirations:
+                            return None
+                        if expiration_date in expirations:
+                            exp = expiration_date
+                        else:
+                            target = datetime.strptime(expiration_date, '%Y-%m-%d')
+                            exp = min(expirations,
+                                      key=lambda e: abs(datetime.strptime(e, '%Y-%m-%d') - target))
+                        chain = ticker.option_chain(exp)
+                        quotes = chain.calls if option_type == 'call' else chain.puts
+                        strikes = quotes['strike'].values
+                        bid = quotes['bid'].fillna(0).values
+                        ask = quotes['ask'].fillna(0).values
+                        last = quotes['lastPrice'].fillna(0).values
+                        prices = np.where((bid > 0) & (ask > 0), (bid + ask) / 2.0, last)
+                        valid = prices > 0
+                        if not valid.any():
+                            return None
+                        exp_dt = datetime.strptime(exp, '%Y-%m-%d')
+                        T = max((exp_dt - datetime.now()).days / 365.0, 0.001)
+                        return {'expiration': exp, 'T': T,
+                                'strikes': strikes[valid], 'prices': prices[valid]}
+                    except Exception as e:
+                        print(f"Warning: could not fetch market option chain: {e}")
+                        return None
+
+                def create_chart(stock_data, exp_date, option_type, r_rate, vol, market, output_path):
                     S = stock_data['price']
                     symbol = stock_data['symbol']
                     exp = datetime.strptime(exp_date, '%Y-%m-%d')
@@ -206,15 +236,23 @@ public class PythonExecutor {
                     
                     stock_prices = np.linspace(S * 0.5, S * 1.5, 100)
                     
-                    # Plot 1: Option Price vs Stock Price
+                    # Plot 1: Black-Scholes predicted vs actual market option prices
                     ax1 = fig.add_subplot(gs[0, 0])
-                    opt_prices = [black_scholes(sp, S, T, r, sigma, option_type) for sp in stock_prices]
-                    ax1.plot(stock_prices, opt_prices, 'b-', linewidth=2)
-                    ax1.axvline(x=S, color='r', linestyle='--', label=f'Current: ${S:.2f}')
-                    ax1.set_xlabel('Stock Price ($)')
+                    T_cmp = market['T'] if market is not None else T
+                    model_prices = [black_scholes(S, k, T_cmp, r, sigma, option_type) for k in stock_prices]
+                    ax1.plot(stock_prices, model_prices, 'b-', linewidth=2, label='Black-Scholes (model)')
+                    if market is not None:
+                        window = (market['strikes'] >= S * 0.5) & (market['strikes'] <= S * 1.5)
+                        ax1.plot(market['strikes'][window], market['prices'][window], 'ro',
+                                 markersize=4, alpha=0.7, label=f"Market ({market['expiration']})")
+                    else:
+                        ax1.text(0.5, 0.9, 'Market option data unavailable', transform=ax1.transAxes,
+                                 ha='center', fontsize=9, color='gray')
+                    ax1.axvline(x=S, color='g', linestyle='--', alpha=0.7, label=f'Spot: ${S:.2f}')
+                    ax1.set_xlabel('Strike ($)')
                     ax1.set_ylabel('Option Price ($)')
-                    ax1.set_title('Option Price vs Stock Price')
-                    ax1.legend()
+                    ax1.set_title('Model vs Market Option Prices')
+                    ax1.legend(loc='best', fontsize=8)
                     ax1.grid(True, alpha=0.3)
                     
                     # Plot 2: Time Decay
@@ -324,7 +362,14 @@ public class PythonExecutor {
                     print(f"Vega: ${greeks['vega']:.4f}")
                     print(f"Rho: ${greeks['rho']:.4f}")
                     
-                    chart_path = create_chart(stock_data, exp_date, option_type, r_rate, vol, output_dir)
+                    print("\\nFetching market option chain...")
+                    market = fetch_market_options(symbol, exp_date, option_type)
+                    if market is None:
+                        print("No market option data available; chart will show model prices only.")
+                    else:
+                        print(f"Market expiration used: {market['expiration']} ({len(market['strikes'])} quoted strikes)")
+
+                    chart_path = create_chart(stock_data, exp_date, option_type, r_rate, vol, market, output_dir)
                     print(f"\\nChart saved to: {chart_path}")
                     print("Analysis complete!")
                 
